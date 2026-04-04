@@ -116,7 +116,7 @@ def main():
         description="llm-jp-4-thinking-sft-data からプロンプトを抽出"
     )
     parser.add_argument(
-        "--output", "-o", default="prompts.jsonl", help="出力ファイルパス"
+        "--output", "-o", default="./data/prompts.jsonl", help="出力ファイルパス"
     )
     parser.add_argument(
         "--subsets",

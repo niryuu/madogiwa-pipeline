@@ -32,13 +32,16 @@ def build_prompt_text(conversations):
     return "\n\n".join(parts)
 
 
-def generate_trace(model, processor, config, user_prompt, max_tokens=4096, temp=0.7):
+def generate_trace(model, processor, config, user_prompt, max_tokens=4096, temp=1.0):
     """
     gemma-4-31b-it で thinking トレースつき応答を生成する。
-    Gemma 4 は <think>...</think> タグで思考を出力する。
+    enable_thinking=True で <|think|> トークンを有効化し、
+    思考チャネル (<|channel>thought ... <channel|>) を出力させる。
     """
-    formatted = apply_chat_template(processor, config, user_prompt)
-    output = generate(
+    formatted = apply_chat_template(
+        processor, config, user_prompt, enable_thinking=True
+    )
+    result = generate(
         model,
         processor,
         formatted,
@@ -46,28 +49,41 @@ def generate_trace(model, processor, config, user_prompt, max_tokens=4096, temp=
         temp=temp,
         verbose=False,
     )
-    return output
+    return result.text
 
 
 def parse_thinking_response(response_text):
     """
     Gemma 4 の応答を thinking (analysis) 部分と final 部分に分割する。
-    <think>...</think> タグがある場合はそれを analysis として扱う。
+    Gemma 4 は <|channel>thought ... <channel|> マーカーで思考チャネルを示す。
     """
-    analysis = ""
-    final = response_text
+    analysis_parts = []
+    final_parts = []
 
-    if "<think>" in response_text:
-        think_start = response_text.index("<think>") + len("<think>")
-        if "</think>" in response_text:
-            think_end = response_text.index("</think>")
-            analysis = response_text[think_start:think_end].strip()
-            final = response_text[think_end + len("</think>"):].strip()
+    # <channel|> で分割し、各パートに <|channel>thought が含まれるか判定
+    parts = response_text.split("<channel|>")
+    for part in parts:
+        if "<|channel>" in part:
+            before_channel, channel_rest = part.split("<|channel>", 1)
+            # <|channel> の前のテキストは final に属する
+            if before_channel.strip():
+                final_parts.append(before_channel.strip())
+            # <|channel> の後のテキストはチャネル名 + 内容
+            # 例: "thought\n内容..." → チャネル名 = "thought", 内容 = "..."
+            if channel_rest.startswith("thought"):
+                thought_content = channel_rest[len("thought"):].strip()
+                if thought_content:
+                    analysis_parts.append(thought_content)
+            else:
+                # thought 以外のチャネルは final に入れる
+                if channel_rest.strip():
+                    final_parts.append(channel_rest.strip())
         else:
-            # </think> がない場合は全体をanalysisとする
-            analysis = response_text[think_start:].strip()
-            final = ""
+            if part.strip():
+                final_parts.append(part.strip())
 
+    analysis = "\n\n".join(analysis_parts)
+    final = "\n\n".join(final_parts)
     return analysis, final
 
 
@@ -126,11 +142,11 @@ def main():
         "--input", "-i", required=True, help="extract_prompts.py の出力JSONL"
     )
     parser.add_argument(
-        "--output", "-o", default="traces.jsonl", help="出力ファイルパス"
+        "--output", "-o", default="./data/traces.jsonl", help="出力ファイルパス"
     )
     parser.add_argument(
         "--model",
-        default="../../../models/mlx/gemma-4-31b-it",
+        default="mlx-community/gemma-4-26b-a4b-it-bf16",
         help="使用するMLXモデル (default: mlx-community/gemma-4-31b-it-4bit)",
     )
     parser.add_argument(
