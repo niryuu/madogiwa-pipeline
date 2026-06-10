@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trace Viewer</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --text-muted: #8b949e;
+    --blue: #58a6ff; --green: #3fb950; --orange: #d29922; --purple: #bc8cff;
+    --red: #f85149;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--text); line-height: 1.5; }
+
+  /* layout */
+  .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 20px; white-space: nowrap; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  select, input[type="text"] {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 14px;
+  }
+  .badge { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+           padding: 2px 10px; font-size: 12px; color: var(--text-muted); }
+
+  /* table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-muted); font-weight: 600; position: sticky; top: 0; background: var(--bg); }
+  tr { cursor: pointer; }
+  tr:hover { background: var(--surface); }
+  tr.active { background: #1f2937; }
+  .col-id { width: 22%; }
+  .col-subset { width: 13%; }
+  .col-prompt { width: 55%; }
+  .col-ann { width: 10%; text-align: center; }
+  .prompt-preview { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; display: block; }
+  .ann-marker { color: var(--purple); font-size: 12px; }
+
+  /* detail panel */
+  .detail-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; }
+  .detail-overlay.open { display: flex; justify-content: center; align-items: start; padding: 40px 20px; overflow-y: auto; }
+  .detail-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+                  max-width: 1000px; width: 100%; padding: 24px; }
+  .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .detail-header h2 { font-size: 16px; word-break: break-all; }
+  .close-btn { background: none; border: none; color: var(--text-muted); font-size: 24px; cursor: pointer; padding: 4px 8px; }
+  .close-btn:hover { color: var(--text); }
+  .detail-meta { display: flex; gap: 8px; margin-bottom: 16px; }
+
+  .section { margin-bottom: 20px; }
+  .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+                   margin-bottom: 6px; padding: 4px 8px; border-radius: 4px; display: inline-block; }
+  .label-prompt { background: #1a3a5c; color: var(--blue); }
+  .label-reasoning { background: #2d2006; color: var(--orange); }
+  .label-answer { background: #0f2d16; color: var(--green); }
+  .label-annotation { background: #2b1a3d; color: var(--purple); }
+  .section-body { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+                  padding: 16px; white-space: pre-wrap; word-wrap: break-word; font-size: 14px;
+                  max-height: 400px; overflow-y: auto; }
+  .section-body.collapsed { max-height: 150px; }
+  .toggle-btn { background: none; border: 1px solid var(--border); border-radius: 4px;
+                color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 2px 8px; margin-left: 8px; }
+  .toggle-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
+  /* annotation form */
+  .ann-form { display: flex; flex-direction: column; gap: 8px; }
+  .ann-textarea { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+                  padding: 12px; font-size: 14px; font-family: inherit; resize: vertical; min-height: 80px; width: 100%; }
+  .ann-textarea:focus { outline: none; border-color: var(--purple); }
+  .ann-actions { display: flex; gap: 8px; align-items: center; }
+  .btn { border: 1px solid var(--border); border-radius: 6px; padding: 6px 16px; cursor: pointer;
+         font-size: 13px; font-family: inherit; }
+  .btn-save { background: var(--purple); color: #fff; border-color: var(--purple); }
+  .btn-save:hover { opacity: 0.9; }
+  .btn-delete { background: transparent; color: var(--red); border-color: var(--red); }
+  .btn-delete:hover { background: var(--red); color: #fff; }
+  .ann-status { font-size: 12px; color: var(--green); opacity: 0; transition: opacity 0.3s; }
+  .ann-status.show { opacity: 1; }
+
+  /* pagination */
+  .pagination { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 16px; }
+  .pagination button { background: var(--surface); color: var(--text); border: 1px solid var(--border);
+                       border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 14px; }
+  .pagination button:disabled { opacity: 0.4; cursor: default; }
+  .pagination button:not(:disabled):hover { border-color: var(--blue); }
+  .page-info { color: var(--text-muted); font-size: 14px; }
+
+  /* nav between records in detail */
+  .detail-nav { display: flex; justify-content: space-between; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .detail-nav button { background: var(--bg); color: var(--text); border: 1px solid var(--border);
+                       border-radius: 6px; padding: 6px 16px; cursor: pointer; font-size: 13px; }
+  .detail-nav button:hover { border-color: var(--blue); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Trace Viewer</h1>
+    <div class="controls">
+      <select id="subset-filter">
+        <option value="">All subsets</option>
+        {% for s in subsets %}
+        <option value="{{ s }}">{{ s }}</option>
+        {% endfor %}
+      </select>
+      <select id="annotated-filter">
+        <option value="">All</option>
+        <option value="yes">Annotated</option>
+        <option value="no">Unannotated</option>
+      </select>
+      <input type="text" id="search" placeholder="Search prompt / answer / id ..." style="width:260px">
+      <span class="badge" id="count-badge">{{ total }} records</span>
+    </div>
+  </header>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th class="col-id">ID</th>
+        <th class="col-subset">Subset</th>
+        <th class="col-prompt">Prompt</th>
+        <th class="col-ann">Annotation</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    <button id="prev-btn" onclick="goPage(currentPage-1)">&larr; Prev</button>
+    <span class="page-info" id="page-info"></span>
+    <button id="next-btn" onclick="goPage(currentPage+1)">Next &rarr;</button>
+  </div>
+</div>
+
+<!-- detail overlay -->
+<div class="detail-overlay" id="detail" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-panel">
+    <div class="detail-header">
+      <h2 id="detail-id"></h2>
+      <button class="close-btn" onclick="closeDetail()">&times;</button>
+    </div>
+    <div class="detail-meta">
+      <span class="badge" id="detail-subset"></span>
+      <span class="badge" id="detail-split"></span>
+    </div>
+
+    <div class="section">
+      <span class="section-label label-prompt">Prompt</span>
+      <div class="section-body" id="detail-prompt"></div>
+    </div>
+
+    <div class="section">
+      <span class="section-label label-reasoning">Reasoning</span>
+      <button class="toggle-btn" id="reasoning-toggle" onclick="toggleReasoning()">expand</button>
+      <div class="section-body collapsed" id="detail-reasoning"></div>
+    </div>
+
+    <div class="section">
+      <span class="section-label label-answer">Answer</span>
+      <div class="section-body" id="detail-answer"></div>
+    </div>
+
+    <div class="section">
+      <span class="section-label label-annotation">Annotation</span>
+      <div class="ann-form">
+        <textarea class="ann-textarea" id="ann-text" placeholder="問題点をここに記入..."></textarea>
+        <div class="ann-actions">
+          <button class="btn btn-save" onclick="saveAnnotation()">Save</button>
+          <button class="btn btn-delete" onclick="deleteAnnotation()">Delete</button>
+          <span class="ann-status" id="ann-status">Saved</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-nav">
+      <button onclick="navRecord(-1)">&larr; Prev record</button>
+      <button onclick="navRecord(1)">Next record &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentPage = 1;
+let totalPages = 1;
+let currentRecords = [];
+let currentIdx = -1;
+let debounceTimer = null;
+
+const PER_PAGE = 50;
+
+async function fetchRecords(page, subset, q, annotated) {
+  const params = new URLSearchParams({page, per_page: PER_PAGE});
+  if (subset) params.set("subset", subset);
+  if (q) params.set("q", q);
+  if (annotated) params.set("annotated", annotated);
+  const resp = await fetch("/api/records?" + params);
+  return resp.json();
+}
+
+function renderTable(data) {
+  currentRecords = data.records;
+  totalPages = data.pages;
+  document.getElementById("count-badge").textContent = data.total + " records";
+  document.getElementById("page-info").textContent = `Page ${data.page} / ${data.pages || 1}`;
+  document.getElementById("prev-btn").disabled = data.page <= 1;
+  document.getElementById("next-btn").disabled = data.page >= data.pages;
+
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+  data.records.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    const annPreview = r.annotation
+      ? `<span class="ann-marker" title="${esc(r.annotation)}">${esc(r.annotation.slice(0, 30))}${r.annotation.length > 30 ? '...' : ''}</span>`
+      : '';
+    tr.innerHTML = `<td class="col-id">${esc(r.id)}</td>
+      <td class="col-subset">${esc(r.subset)}</td>
+      <td class="col-prompt"><span class="prompt-preview">${esc(r.prompt_short)}</span></td>
+      <td class="col-ann">${annPreview}</td>`;
+    tr.onclick = () => openDetail(i);
+    tbody.appendChild(tr);
+  });
+}
+
+function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s || "";
+  return d.innerHTML;
+}
+
+async function goPage(p) {
+  if (p < 1 || p > totalPages) return;
+  currentPage = p;
+  await reload();
+}
+
+async function reload() {
+  const subset = document.getElementById("subset-filter").value;
+  const q = document.getElementById("search").value.trim();
+  const annotated = document.getElementById("annotated-filter").value;
+  const data = await fetchRecords(currentPage, subset, q, annotated);
+  renderTable(data);
+}
+
+function openDetail(idx) {
+  currentIdx = idx;
+  const r = currentRecords[idx];
+  if (!r) return;
+  document.getElementById("detail-id").textContent = r.id;
+  document.getElementById("detail-subset").textContent = r.subset;
+  document.getElementById("detail-split").textContent = r.split;
+  document.getElementById("detail-prompt").textContent = r.prompt;
+  document.getElementById("detail-reasoning").textContent = r.reasoning || "(none)";
+  document.getElementById("detail-answer").textContent = r.answer;
+  document.getElementById("ann-text").value = r.annotation || "";
+  hideStatus();
+
+  // reset reasoning collapse
+  document.getElementById("detail-reasoning").classList.add("collapsed");
+  document.getElementById("reasoning-toggle").textContent = "expand";
+
+  document.getElementById("detail").classList.add("open");
+  document.body.style.overflow = "hidden";
+}
+
+function closeDetail() {
+  document.getElementById("detail").classList.remove("open");
+  document.body.style.overflow = "";
+}
+
+function toggleReasoning() {
+  const el = document.getElementById("detail-reasoning");
+  const btn = document.getElementById("reasoning-toggle");
+  el.classList.toggle("collapsed");
+  btn.textContent = el.classList.contains("collapsed") ? "expand" : "collapse";
+}
+
+function navRecord(dir) {
+  const next = currentIdx + dir;
+  if (next >= 0 && next < currentRecords.length) {
+    openDetail(next);
+  }
+}
+
+function showStatus(msg, isError) {
+  const el = document.getElementById("ann-status");
+  el.textContent = msg;
+  el.style.color = isError ? "var(--red)" : "var(--green)";
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 2000);
+}
+
+function hideStatus() {
+  document.getElementById("ann-status").classList.remove("show");
+}
+
+async function saveAnnotation() {
+  const r = currentRecords[currentIdx];
+  if (!r) return;
+  const text = document.getElementById("ann-text").value.trim();
+  if (!text) { showStatus("Empty annotation", true); return; }
+
+  const resp = await fetch(`/api/annotations/${encodeURIComponent(r.id)}`, {
+    method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({annotation: text}),
+  });
+  if (resp.ok) {
+    r.annotation = text;
+    showStatus("Saved");
+    reload();  // refresh table markers
+  } else {
+    showStatus("Save failed", true);
+  }
+}
+
+async function deleteAnnotation() {
+  const r = currentRecords[currentIdx];
+  if (!r) return;
+
+  const resp = await fetch(`/api/annotations/${encodeURIComponent(r.id)}`, {
+    method: "DELETE",
+  });
+  if (resp.ok) {
+    r.annotation = "";
+    document.getElementById("ann-text").value = "";
+    showStatus("Deleted");
+    reload();
+  } else {
+    showStatus("Delete failed", true);
+  }
+}
+
+document.addEventListener("keydown", e => {
+  if (!document.getElementById("detail").classList.contains("open")) return;
+  // don't capture keys while typing in textarea
+  if (document.activeElement === document.getElementById("ann-text")) return;
+  if (e.key === "Escape") closeDetail();
+  if (e.key === "ArrowLeft") navRecord(-1);
+  if (e.key === "ArrowRight") navRecord(1);
+});
+
+document.getElementById("subset-filter").onchange = () => { currentPage = 1; reload(); };
+document.getElementById("annotated-filter").onchange = () => { currentPage = 1; reload(); };
+document.getElementById("search").oninput = () => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => { currentPage = 1; reload(); }, 300);
+};
+
+reload();
+</script>
+</body>
+</html>

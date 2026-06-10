@@ -1,0 +1,12 @@
+[project]
+name = "madogiwa-train"
+version = "0.1.0"
+description = "SDFT training infrastructure for llm-jp-4-base on MLX"
+requires-python = ">=3.10"
+dependencies = [
+    "mlx>=0.20",
+    "mlx-lm>=0.21",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+]

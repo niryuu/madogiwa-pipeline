@@ -1,0 +1,57 @@
+# SDFT default config — tuned for M2 Ultra 128GB
+
+# --- model ---
+# HuggingFace path. mlx-lm が自動で MLX 形式に変換・キャッシュする。
+# llm-jp/llm-jp-4-8b-base は HF からダウンロード可。MLX 形式版が公開されていれば
+# mlx-community/llm-jp-4-8b-base 等を指定しても良い。
+model_path: "llm-jp/llm-jp-4-8b-base"
+
+# --- LoRA ---
+lora:
+  num_layers: 16  # 末尾 N 層に LoRA を入れる (8B なら全 32 層中の上半分)
+  rank: 16
+  scale: 20.0
+  dropout: 0.0
+
+# --- data ---
+data:
+  train_file: "../data/traces_10000_clean.jsonl"
+  max_seq_len: 4096       # student/teacher input の最大トークン長
+  batch_size: 4           # 1 step で処理する record 数 (forward+backward をバッチ化)
+  shuffle: true
+  seed: 42
+
+# --- SDFT 損失 ---
+sdft:
+  ema_alpha: 0.01         # teacher = (1 - α) * teacher + α * student
+  temperature: 1.0        # KL 計算用の温度 (logits / T)
+  bridge_instruction: "Now answer with a response of your own, including the thinking process."
+  # loss = (1 - sft_weight) * KL_SDFT + sft_weight * CE_SFT
+  # 0.0 = 純 SDFT, 1.0 = 純 SFT (生成・teacher fwd 省略で高速)
+  # 戦略: phase1 で純 SFT で format 仕込み → phase2 で SDFT に切替
+  sft_weight: 1.0
+
+# --- on-policy sampling ---
+sampling:
+  temperature: 0.7
+  top_p: 0.95
+  max_completion_tokens: 1024
+
+# --- optimizer ---
+optimizer:
+  learning_rate: 5.0e-5
+  weight_decay: 0.0
+  betas: [0.9, 0.999]
+
+# --- schedule ---
+schedule:
+  warmup_steps: 25
+  total_steps: 250        # batch_size=4 なら 1000 record/run
+  grad_accum_steps: 32    # 注: 現状未使用 (将来用)
+
+# --- runtime ---
+runtime:
+  log_every: 1
+  save_every: 50
+  output_dir: "./checkpoints_sft_n1000"
+  resume_from: null       # 復帰したい場合は LoRA adapter ファイルパス
